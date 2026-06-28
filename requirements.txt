@@ -1,0 +1,13 @@
+# 멀티 에이전트 협찬 메일 자동화 (CLI 프로토타입)
+langgraph
+langchain
+langchain-google-genai
+langchain-tavily
+google-auth
+google-auth-oauthlib
+google-api-python-client
+python-dotenv
+pydantic
+
+# 기존 Flask UI (app.py) 용
+flask
