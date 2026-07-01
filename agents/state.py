@@ -22,6 +22,11 @@ class Company(TypedDict, total=False):
 
 class WorkflowState(TypedDict, total=False):
     companies: list[Company]
-    sponsor_items: str   # 협찬 품목/내용 (작성 에이전트 입력)
+    sponsor_items: str   # 제안 내용 (작성 에이전트 입력)
     sender_name: str
     sender_email: str
+    campus: str          # 캠퍼스 (작성 에이전트 입력)
+    writer_name: str     # 담당자 이름
+    event_name: str      # 행사명
+    writer_phone: str    # 담당자 연락처
+    event_date: str      # 행사 일자 (YYYY-MM-DD)
