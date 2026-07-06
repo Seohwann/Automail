@@ -440,7 +440,7 @@ HTML = """<!DOCTYPE html>
   button.ghost { background:#fff; color:#4a4f5a; border:1px solid #ccc; padding:8px 14px; border-radius:7px; font-size:13px; cursor:pointer; }
   .save-row { margin-top:16px; display:flex; align-items:center; gap:12px; }
   .tabs { display:flex; gap:4px; padding:0 24px; background:#f5f6f8; border-bottom:1px solid #e3e5e9; }
-  .tab { padding:13px 20px; cursor:pointer; font-size:14px; font-weight:600; color:#7a808a; border-bottom:3px solid transparent; }
+  .tab { padding:13px 20px; cursor:pointer; font-size:16px; font-weight:600; color:#7a808a; border-bottom:3px solid transparent; }
   .tab.active { color:#2b2d42; border-bottom-color:#4361ee; }
   .panel { display:none; padding:22px 24px; }
   .panel.active { display:block; }
@@ -517,9 +517,9 @@ HTML = """<!DOCTYPE html>
 </div>
 
 <div class="tabs">
-  <div class="tab active" data-tab="search" onclick="switchTab('search')">1 · 검색</div>
-  <div class="tab" data-tab="write" onclick="switchTab('write')">2 · 초안 작성</div>
-  <div class="tab" data-tab="reply" onclick="switchTab('reply')">3 · 후속 대응</div>
+  <div class="tab active" data-tab="search" onclick="switchTab('search')">검색</div>
+  <div class="tab" data-tab="write" onclick="switchTab('write')">초안 작성</div>
+  <div class="tab" data-tab="reply" onclick="switchTab('reply')">후속 대응</div>
 </div>
 
 <div class="panel active" id="panel-search">
