@@ -14,6 +14,7 @@
 import json
 import os
 import re
+import threading
 import time
 
 from flask import Flask, jsonify, request
@@ -22,9 +23,10 @@ from agents.config import get_llm
 from agents.google_clients import (authenticate, fetch_latest_reply,
                                    fetch_latest_reply_meta, get_sender_info,
                                    read_column, send_email, write_column)
-from agents.graph import (build_reply_graph, build_search_graph,
-                          build_write_graph)
+from agents.graph import build_reply_graph
 from agents.reply_agent import classify_reply
+from agents.supervisor import build_supervisor_graph
+from langgraph.types import Command
 
 app = Flask(__name__)
 
@@ -62,7 +64,6 @@ if not cfg.get("campus"):
 if not (cfg.get("attachment_path") and os.path.exists(cfg["attachment_path"])):
     cfg["attachment_path"] = ""
 
-pipeline = {"rows": []}   # 행 정렬을 유지한 업체 상태 (검색→작성 누적)
 
 _creds = None
 _llm = None
@@ -196,129 +197,6 @@ def upload():
     return jsonify({"ok": True, "filename": name})
 
 
-# ---------- 1. 검색 ----------
-
-@app.route("/search", methods=["POST"])
-def search():
-    limit = int((request.get_json(force=True) or {}).get("limit") or 0)
-    try:
-        rows = read_aligned()
-        targets, considered = [], 0
-        for i, r in enumerate(rows):
-            if not r["name"]:
-                continue
-            if limit and considered >= limit:
-                break
-            considered += 1
-            targets.append((i, r))
-        # LangGraph 검색 그래프로 오케스트레이션
-        result = build_search_graph(llm()).invoke({"companies": [r for _, r in targets]})
-        for (i, _), c in zip(targets, result["companies"]):
-            rows[i].update(c)
-        write_column(creds(), cfg["spreadsheet_id"], cfg["email_range"],
-                     [r.get("email", "") for r in rows])
-        pipeline["rows"] = rows
-        out = [{"i": i, "name": rows[i]["name"], "email": rows[i].get("email", ""),
-                "tier": rows[i].get("tier", ""), "hint": rows[i].get("hint", ""),
-                "query": rows[i].get("query", ""), "verified": bool(rows[i].get("verified")),
-                "reason": rows[i].get("verify_reason", ""), "info": rows[i].get("info", "")}
-               for i, _ in targets]
-        return jsonify({"results": out})
-    except Exception as e:  # noqa: BLE001
-        return jsonify({"error": str(e)}), 500
-
-
-# ---------- 2. 초안 작성 ----------
-
-@app.route("/write", methods=["POST"])
-def write():
-    limit = int((request.get_json(force=True) or {}).get("limit") or 0)
-    try:
-        rows = pipeline["rows"] or read_aligned()
-        sender_name, _ = sender_info()
-        targets, considered = [], 0
-        for i, r in enumerate(rows):
-            if not r["name"]:
-                continue
-            if limit and considered >= limit:
-                break
-            considered += 1
-            if not r.get("email"):
-                continue
-            targets.append((i, r))
-        # LangGraph 작성 그래프로 오케스트레이션 (설정값은 state 로 전달)
-        result = build_write_graph(llm()).invoke({
-            "companies": [r for _, r in targets],
-            "sponsor_items": cfg["sponsor_items"],
-            "sender_name": sender_name,
-            "campus": cfg.get("campus", ""),
-            "writer_name": cfg.get("writer_name", ""),
-            "event_name": cfg.get("event_name", ""),
-            "writer_phone": cfg.get("writer_phone", ""),
-            "event_date": cfg.get("event_date", ""),
-        })
-        for (i, _), c in zip(targets, result["companies"]):
-            rows[i].update(c)
-        write_column(creds(), cfg["spreadsheet_id"], subject_range(),
-                     [r.get("subject", "") for r in rows])
-        write_column(creds(), cfg["spreadsheet_id"], body_range(),
-                     [r.get("body", "") for r in rows])
-        pipeline["rows"] = rows
-        out = [{"i": i, "name": rows[i]["name"], "subject": rows[i].get("subject", ""),
-                "body": rows[i].get("body", "")}
-               for i, _ in targets if rows[i].get("subject")]
-        return jsonify({"results": out})
-    except Exception as e:  # noqa: BLE001
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/write/save", methods=["POST"])
-def write_save():
-    d = request.get_json(force=True)
-    i = int(d["index"])
-    try:
-        rows = pipeline["rows"]
-        if not rows:
-            return jsonify({"error": "먼저 검색 또는 초안 작성을 실행하세요."}), 400
-        rows[i]["subject"] = (d.get("subject") or "").strip()
-        rows[i]["body"] = (d.get("body") or "").strip()
-        write_column(creds(), cfg["spreadsheet_id"], subject_range(),
-                     [r.get("subject", "") for r in rows])
-        write_column(creds(), cfg["spreadsheet_id"], body_range(),
-                     [r.get("body", "") for r in rows])
-        return jsonify({"ok": True})
-    except Exception as e:  # noqa: BLE001
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proposal/send", methods=["POST"])
-def proposal_send():
-    """작성한 제안 초안을 실제(또는 테스트) 수신자에게 발송. PDF 첨부 + 라벨 적용."""
-    d = request.get_json(force=True)
-    i = int(d["index"])
-    test_email = (d.get("test_email") or "").strip()
-    subject = (d.get("subject") or "").strip()
-    body = (d.get("body") or "").strip()
-    if not subject or not body:
-        return jsonify({"error": "제목과 본문을 채워주세요."}), 400
-    try:
-        rows = pipeline["rows"]
-        if not rows:
-            return jsonify({"error": "먼저 검색 또는 초안 작성을 실행하세요."}), 400
-        r = rows[i]
-        recipient = test_email or r.get("email", "")
-        if not recipient:
-            return jsonify({"error": "수신 이메일이 없습니다."}), 400
-        sender_name, sender_email = sender_info()
-        attach = cfg.get("attachment_path") or None
-        result = send_email(creds(), recipient, subject, body,
-                            sender_name=sender_name, sender_email=sender_email,
-                            attachment_path=attach, label=_label())
-        return jsonify({"ok": True, "to": recipient, "id": result.get("id")})
-    except Exception as e:  # noqa: BLE001
-        return jsonify({"error": str(e)}), 500
-
-
 # ---------- 3. 후속 대응 ----------
 
 def load_companies():
@@ -407,6 +285,158 @@ def send():
         return jsonify({"ok": True, "to": recipient, "id": result.get("id")})
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
+
+
+
+# ---------- 4. 자동 실행 (supervisor 멀티 에이전트) ----------
+
+AUTO = {
+    "running": False, "done": False, "error": "",
+    "log": [], "pending": None, "results": [],
+    "indices": [], "rows": [],
+    "event": threading.Event(), "resume": None,
+}
+
+
+def _auto_log(msg):
+    AUTO["log"].append(str(msg))
+
+
+def _persist_auto_rows(companies):
+    """supervisor 결과를 전체 행에 반영하고 시트(이메일/제목/본문 열)에 저장."""
+    rows = AUTO["rows"]
+    for local, c in zip(AUTO["indices"], companies):
+        rows[local].update(c)
+    write_column(creds(), cfg["spreadsheet_id"], cfg["email_range"],
+                 [r.get("email", "") for r in rows])
+    write_column(creds(), cfg["spreadsheet_id"], subject_range(),
+                 [r.get("subject", "") for r in rows])
+    write_column(creds(), cfg["spreadsheet_id"], body_range(),
+                 [r.get("body", "") for r in rows])
+
+
+def _auto_worker(limit, test_email, mode="fresh"):
+    """백그라운드에서 supervisor 그래프를 실행. interrupt(발송 승인) 시 사람을 기다린다."""
+    try:
+        rows = read_aligned()
+        targets, considered = [], 0
+        for i, r in enumerate(rows):
+            if not r["name"]:
+                continue
+            if limit and considered >= limit:
+                break
+            considered += 1
+            targets.append(i)
+        if not targets:
+            AUTO["error"] = "처리할 업체가 없습니다."
+            return
+        AUTO["rows"], AUTO["indices"] = rows, targets
+        if mode == "skip":
+            # 검색 건너뛰기: 시트의 업체명+이메일을 그대로 쓰고 '작성'부터 진행.
+            # 검색 시도 횟수를 상한으로 채워 supervisor 가 검색을 고를 수 없게 한다.
+            _auto_log("[검색 건너뛰기] 시트의 이메일을 그대로 사용해 초안 작성부터 진행합니다.")
+            no_email = []
+            for i in targets:
+                for k in ("tier", "verified", "verify_reason", "query",
+                          "sent", "message_id", "reply_status", "follow_up"):
+                    rows[i].pop(k, None)
+                rows[i]["subject"] = rows[i]["body"] = ""
+                rows[i]["search_attempts"] = 99   # 검색 차단 (재시도 상한 초과)
+                if not rows[i].get("email"):
+                    no_email.append(rows[i]["name"])
+            if no_email:
+                _auto_log("[검색 건너뛰기] 이메일이 없어 제외되는 업체: "
+                          + ", ".join(no_email))
+        else:
+            # 전체 새로 실행: 시트에 있던 이메일/등급/초안을 비우고 검색부터 진행
+            _auto_log("[재검색] 시트의 기존 이메일·초안을 무시하고 처음부터 실행합니다.")
+            for i in targets:
+                for k in ("email", "tier", "verified", "verify_reason", "query",
+                          "info", "subject", "body", "sent", "message_id",
+                          "reply_status", "follow_up", "search_attempts"):
+                    rows[i].pop(k, None)
+                rows[i]["email"] = rows[i]["subject"] = rows[i]["body"] = ""
+        sender_name, sender_email = sender_info()
+        graph = build_supervisor_graph(creds(), llm(), on_event=_auto_log)
+        config = {"configurable": {"thread_id": f"auto-{time.time()}"},
+                  "recursion_limit": 100}
+        state = {
+            "companies": [dict(rows[i]) for i in targets],
+            "sponsor_items": cfg["sponsor_items"],
+            "sender_name": sender_name, "sender_email": sender_email,
+            "campus": cfg.get("campus", ""), "writer_name": cfg.get("writer_name", ""),
+            "event_name": cfg.get("event_name", ""),
+            "writer_phone": cfg.get("writer_phone", ""),
+            "event_date": cfg.get("event_date", ""),
+            "test_email": test_email,
+            "attachment_path": cfg.get("attachment_path", ""),
+            "label": _label() or "",
+        }
+        result = graph.invoke(state, config)
+        while "__interrupt__" in result:
+            # 발송 승인 대기: 현재까지의 초안을 시트에 저장해 두고 사람을 기다린다
+            try:
+                _persist_auto_rows(result.get("companies") or [])
+            except Exception as e:  # noqa: BLE001 - 시트 저장 실패해도 계속
+                _auto_log(f"[경고] 시트 저장 실패: {e}")
+            AUTO["pending"] = result["__interrupt__"][0].value
+            _auto_log("[관리자] 발송 승인 대기 — 대시보드에서 승인해 주세요.")
+            AUTO["event"].clear()
+            AUTO["event"].wait()
+            AUTO["pending"] = None
+            result = graph.invoke(Command(resume=AUTO["resume"]), config)
+        comps = result.get("companies", [])
+        try:
+            _persist_auto_rows(comps)
+        except Exception as e:  # noqa: BLE001
+            _auto_log(f"[경고] 시트 저장 실패: {e}")
+        AUTO["results"] = comps
+        AUTO["done"] = True
+        _auto_log("[완료] 자동 실행 종료")
+    except Exception as e:  # noqa: BLE001
+        AUTO["error"] = str(e)
+        _auto_log(f"[오류] {e}")
+    finally:
+        AUTO["running"] = False
+
+
+@app.route("/auto/start", methods=["POST"])
+def auto_start():
+    d = request.get_json(force=True) or {}
+    if AUTO["running"]:
+        return jsonify({"error": "이미 실행 중입니다."}), 409
+    AUTO.update({"running": True, "done": False, "error": "", "log": [],
+                 "pending": None, "results": [], "resume": None})
+    limit = int(d.get("limit") or 0)
+    test_email = (d.get("test_email") or "").strip()
+    mode = "skip" if d.get("mode") == "skip" else "fresh"
+    threading.Thread(target=_auto_worker, args=(limit, test_email, mode),
+                     daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/auto/status")
+def auto_status():
+    return jsonify({
+        "running": AUTO["running"], "done": AUTO["done"], "error": AUTO["error"],
+        "log": AUTO["log"], "pending": AUTO["pending"],
+        "results": [{"name": c.get("name", ""), "email": c.get("email", ""),
+                     "tier": c.get("tier", ""), "sent": bool(c.get("sent")),
+                     "skipped": bool(c.get("skipped")),
+                     "reply_status": c.get("reply_status", ""),
+                     "follow_up": c.get("follow_up", "")}
+                    for c in AUTO["results"]],
+    })
+
+
+@app.route("/auto/approve", methods=["POST"])
+def auto_approve():
+    d = request.get_json(force=True) or {}
+    if not AUTO["running"] or not AUTO["pending"]:
+        return jsonify({"error": "승인 대기 중인 작업이 없습니다."}), 400
+    AUTO["resume"] = {"approved": d.get("approved") or []}
+    AUTO["event"].set()
+    return jsonify({"ok": True})
 
 
 HTML = """<!DOCTYPE html>
@@ -517,28 +547,8 @@ HTML = """<!DOCTYPE html>
 </div>
 
 <div class="tabs">
-  <div class="tab active" data-tab="search" onclick="switchTab('search')">1 · 검색</div>
-  <div class="tab" data-tab="write" onclick="switchTab('write')">2 · 초안 작성</div>
-  <div class="tab" data-tab="reply" onclick="switchTab('reply')">3 · 후속 대응</div>
-</div>
-
-<div class="panel active" id="panel-search">
-  <div class="bar">
-    <label>처리 개수 (빈칸=전체) <input class="num" id="searchLimit" value="3" style="width:64px"></label>
-    <button class="primary" id="searchBtn" onclick="runSearch()">검색 실행</button>
-    <span class="msg" id="searchMsg"></span>
-  </div>
-  <div id="searchResults"></div>
-</div>
-
-<div class="panel" id="panel-write">
-  <div class="bar">
-    <label>처리 개수 (빈칸=전체) <input class="num" id="writeLimit" value="3" style="width:64px"></label>
-    <button class="primary" id="writeBtn" onclick="runWrite()">초안 작성 실행</button>
-    <button class="ghost" id="sendAllBtn" onclick="sendAllProposals()">표시된 초안 전체 발송</button>
-    <span class="msg" id="writeMsg"></span>
-  </div>
-  <div id="writeResults"></div>
+  <div class="tab active" data-tab="auto" onclick="switchTab('auto')">자동 실행 (에이전트)</div>
+  <div class="tab" data-tab="reply" onclick="switchTab('reply')">후속 대응</div>
 </div>
 
 <div class="panel" id="panel-reply">
@@ -552,11 +562,26 @@ HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<div class="panel active" id="panel-auto">
+  <div class="bar">
+    <label>처리 개수 (빈칸=전체) <input class="num" id="autoLimit" value="3" style="width:64px"></label>
+    <button class="primary" id="autoBtn" onclick="startAuto('fresh')">자동 실행 시작</button>
+    <button class="ghost" id="autoFreshBtn" onclick="startAuto('skip')">검색 건너뛰기</button>
+    <span class="msg" id="autoMsg"></span>
+  </div>
+  <div class="meta" style="margin-bottom:12px"><b>자동 실행 시작</b>: 시트의 기존 이메일·초안을 무시하고 검색 → 초안 작성 → (사람 승인) → 발송 → 답장 확인을 처음부터 진행합니다. <b>검색 건너뛰기</b>: 시트에 기재된 업체명·이메일을 그대로 사용해 초안 작성부터 진행합니다. 두 경우 모두 발송 전에는 반드시 아래에서 승인해야 합니다.</div>
+  <div id="autoApproval"></div>
+  <div class="label">진행 로그</div>
+  <pre id="autoLog" style="background:#1f2133;color:#d7dbe8;border-radius:9px;padding:14px 16px;font-size:12.5px;line-height:1.55;max-height:320px;overflow-y:auto;white-space:pre-wrap"></pre>
+  <div id="autoResults"></div>
+</div>
+
 <script>
 function esc(s){ return (s||'').replace(/[&<>]/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;'})[m]; }); }
 function escAttr(s){ return (s||'').replace(/[&<>"]/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[m]; }); }
 function statusLabel(s){ return ({accepted:'수락', rejected:'거절', question:'문의', no_reply:'무응답', loading:'분류중…'})[s] || ''; }
 function tierBadge(t){ if(t==='HIGH') return '<span class="badge b-ok">검증 O</span>'; if(t==='REVIEW') return '<span class="badge b-question">검토 필요</span>'; return '<span class="badge b-no">미발견</span>'; }
+function emailBadge(tier, email){ if(tier) return tierBadge(tier); if(email) return '<span class="badge b-no_reply">시트 입력·미검증</span>'; return tierBadge(''); }
 
 // ---- 탭 ----
 let replyLoaded = false;
@@ -609,88 +634,6 @@ document.getElementById('c_pdf').onchange = async function(ev){
     pn.textContent = d.error ? ('오류: '+d.error) : ('첨부: '+d.filename);
   } catch(e){ pn.textContent = '오류: '+e; }
 };
-
-// ---- 1. 검색 ----
-async function runSearch(){
-  const btn = document.getElementById('searchBtn');
-  const msg = document.getElementById('searchMsg');
-  const out = document.getElementById('searchResults');
-  const limit = document.getElementById('searchLimit').value.trim();
-  btn.disabled=true; msg.className='msg'; msg.textContent='검색 중… (업체당 수 초)';
-  try {
-    const d = await (await fetch('/search', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({limit:limit})})).json();
-    if (d.error){ msg.className='msg err'; msg.textContent='실패: '+d.error; btn.disabled=false; return; }
-    msg.className='msg ok'; msg.textContent=d.results.length+'개 처리 완료 (시트 이메일 열 저장됨)';
-    out.innerHTML = d.results.map(function(r){
-      const q = r.query ? ('<br><b>검색어</b> '+esc(r.query)+(r.hint?'  (힌트 반영됨)':'  (힌트 없음)')) : '';
-      return '<div class="card"><h3>'+esc(r.name)+' '+tierBadge(r.tier)+'</h3>'+
-        '<div class="meta"><b>이메일</b> '+(esc(r.email)||'(미발견)')+q+'<br>'+
-        '<b>근거</b> '+esc(r.reason)+'<br>'+
-        '<b>요약</b> '+esc(r.info)+'</div></div>';
-    }).join('');
-  } catch(e){ msg.className='msg err'; msg.textContent='실패: '+e; }
-  btn.disabled=false;
-}
-
-// ---- 2. 초안 작성 ----
-async function runWrite(){
-  const btn = document.getElementById('writeBtn');
-  const msg = document.getElementById('writeMsg');
-  const out = document.getElementById('writeResults');
-  const limit = document.getElementById('writeLimit').value.trim();
-  btn.disabled=true; msg.className='msg'; msg.textContent='작성 중… (업체당 수 초)';
-  try {
-    const d = await (await fetch('/write', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({limit:limit})})).json();
-    if (d.error){ msg.className='msg err'; msg.textContent='실패: '+d.error; btn.disabled=false; return; }
-    msg.className='msg ok'; msg.textContent=d.results.length+'개 초안 생성 (시트 제목/본문 저장됨)';
-    out.innerHTML = d.results.map(function(r){
-      return '<div class="card"><h3>'+esc(r.name)+'</h3>'+
-        '<input class="subj" id="ws_'+r.i+'" value="'+escAttr(r.subject)+'">'+
-        '<textarea class="body" id="wb_'+r.i+'">'+esc(r.body)+'</textarea>'+
-        '<div class="save-row"><button class="primary" onclick="saveDraft('+r.i+')">시트에 저장</button>'+
-        '<button class="ghost" onclick="sendProposal('+r.i+')">발송</button>'+
-        '<span class="msg" id="wm_'+r.i+'"></span></div></div>';
-    }).join('');
-  } catch(e){ msg.className='msg err'; msg.textContent='실패: '+e; }
-  btn.disabled=false;
-}
-async function saveDraft(i){
-  const m = document.getElementById('wm_'+i);
-  const subject = document.getElementById('ws_'+i).value.trim();
-  const body = document.getElementById('wb_'+i).value.trim();
-  m.className='msg'; m.textContent='저장 중…';
-  try {
-    const d = await (await fetch('/write/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:i, subject:subject, body:body})})).json();
-    if (d.error){ m.className='msg err'; m.textContent='실패: '+d.error; return; }
-    m.className='msg ok'; m.textContent='저장됨';
-  } catch(e){ m.className='msg err'; m.textContent='실패: '+e; }
-}
-async function sendProposal(i){
-  const m = document.getElementById('wm_'+i);
-  const subject = document.getElementById('ws_'+i).value.trim();
-  const body = document.getElementById('wb_'+i).value.trim();
-  m.className='msg'; m.textContent='발송 중…';
-  try {
-    const d = await (await fetch('/proposal/send', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:i, test_email:testEmail(), subject:subject, body:body})})).json();
-    if (d.error){ m.className='msg err'; m.textContent='실패: '+d.error; return false; }
-    m.className='msg ok'; m.textContent='발송됨 → '+d.to;
-    return true;
-  } catch(e){ m.className='msg err'; m.textContent='실패: '+e; return false; }
-}
-async function sendAllProposals(){
-  const ids = Array.from(document.querySelectorAll('#writeResults [id^="ws_"]')).map(function(el){ return parseInt(el.id.slice(3)); });
-  if (!ids.length){ return; }
-  const t = testEmail();
-  const note = t ? ('테스트 주소('+t+')로 '+ids.length+'건 발송합니다.') : ('테스트 모드 꺼짐 — 실제 업체 '+ids.length+'곳에 발송합니다.');
-  if (!confirm(note+' 계속할까요?')) return;
-  const btn = document.getElementById('sendAllBtn');
-  const msg = document.getElementById('writeMsg');
-  btn.disabled=true;
-  let ok=0, fail=0;
-  for (const i of ids){ if (await sendProposal(i)) ok++; else fail++; }
-  msg.className = fail ? 'msg err' : 'msg ok'; msg.textContent = '발송 완료: 성공 '+ok+' / 실패 '+fail;
-  btn.disabled=false;
-}
 
 // ---- 3. 후속 대응 ----
 let companies = [];
@@ -780,6 +723,101 @@ async function doSend(){
     if (d.error){ msg.className='msg err'; msg.textContent='실패: '+d.error; btn.disabled=false; return; }
     msg.className='msg ok'; msg.textContent='발송 완료 → '+d.to;
   } catch(e){ msg.className='msg err'; msg.textContent='실패: '+e; btn.disabled=false; }
+}
+
+
+// ---- 4. 자동 실행 (supervisor) ----
+let autoTimer = null;
+function setAutoButtons(disabled){
+  document.getElementById('autoBtn').disabled = disabled;
+  document.getElementById('autoFreshBtn').disabled = disabled;
+}
+async function startAuto(mode){
+  const msg = document.getElementById('autoMsg');
+  const limit = document.getElementById('autoLimit').value.trim();
+  const t = testEmail();
+  const note = t ? ('테스트 주소('+t+')로 발송됩니다.') : '테스트 모드 꺼짐 — 실제 업체에 발송될 수 있습니다!';
+  const head = (mode === 'skip')
+    ? '시트에 기재된 이메일을 그대로 사용해 초안 작성부터 진행합니다. '
+    : '시트의 기존 이메일·초안을 무시하고 처음부터 재검색·재작성합니다. ';
+  if (!confirm(head+note+' 계속할까요?')) return;
+  setAutoButtons(true); msg.className='msg'; msg.textContent='실행 중…';
+  document.getElementById('autoResults').innerHTML='';
+  const box = document.getElementById('autoApproval'); box.dataset.shown='0'; box.innerHTML='';
+  try {
+    const d = await (await fetch('/auto/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({limit:limit, test_email:t, mode:mode})})).json();
+    if (d.error){ msg.className='msg err'; msg.textContent=d.error; setAutoButtons(false); return; }
+    autoTimer = setInterval(refreshAuto, 1500);
+  } catch(e){ msg.className='msg err'; msg.textContent='실패: '+e; setAutoButtons(false); }
+}
+async function refreshAuto(){
+  try {
+    const d = await (await fetch('/auto/status')).json();
+    document.getElementById('autoLog').textContent = d.log.join(String.fromCharCode(10));
+    const box = document.getElementById('autoApproval');
+    if (d.pending){ renderApproval(d.pending); }
+    else { box.dataset.shown='0'; box.innerHTML=''; }
+    if (!d.running){
+      clearInterval(autoTimer); autoTimer=null;
+      setAutoButtons(false);
+      const msg = document.getElementById('autoMsg');
+      if (d.error){ msg.className='msg err'; msg.textContent='오류: '+d.error; }
+      else { msg.className='msg ok'; msg.textContent='완료'; }
+      renderAutoResults(d.results);
+    }
+  } catch(e){}
+}
+function renderApproval(p){
+  const box = document.getElementById('autoApproval');
+  if (box.dataset.shown === '1') return;   // 편집 중인 승인 화면 보존
+  box.dataset.shown = '1';
+  box.dataset.ids = JSON.stringify(p.drafts.map(function(d){ return d.i; }));
+  const note = p.test_email ? ('테스트 모드: '+p.test_email+' 로 발송됩니다.') : '실제 업체 주소로 발송됩니다!';
+  box.innerHTML = '<div class="card" style="border-color:#f0c36d;background:#fffbf0">'+
+    '<h3>발송 승인 대기 <span class="badge b-question">사람 확인 필요</span></h3>'+
+    '<div class="meta">'+esc(note)+' 발송할 업체를 선택하고 필요하면 수정한 뒤 승인하세요.</div>'+
+    p.drafts.map(function(d){
+      return '<div class="card" style="margin:10px 0 0">'+
+        '<h3><label style="cursor:pointer"><input type="checkbox" id="ap_'+d.i+'" checked> '+esc(d.name)+'</label> '+emailBadge(d.tier, d.email)+'</h3>'+
+        '<div class="meta"><b>수신</b> '+esc(d.email)+'</div>'+
+        '<input class="subj" id="as_'+d.i+'" value="'+escAttr(d.subject)+'">'+
+        '<textarea class="body" id="ab_'+d.i+'">'+esc(d.body)+'</textarea></div>';
+    }).join('')+
+    '<div class="save-row"><button class="primary" onclick="submitApproval(false)">선택한 업체 발송 승인</button>'+
+    '<button class="ghost" onclick="submitApproval(true)">모두 건너뛰기</button>'+
+    '<span class="msg" id="apMsg"></span></div></div>';
+}
+async function submitApproval(skipAll){
+  const box = document.getElementById('autoApproval');
+  const ids = JSON.parse(box.dataset.ids || '[]');
+  const approved = [];
+  if (!skipAll){
+    ids.forEach(function(i){
+      const cb = document.getElementById('ap_'+i);
+      if (cb && cb.checked){
+        approved.push({i:i, subject:document.getElementById('as_'+i).value.trim(), body:document.getElementById('ab_'+i).value.trim()});
+      }
+    });
+  }
+  const m = document.getElementById('apMsg');
+  m.className='msg'; m.textContent='전송 중…';
+  try {
+    const d = await (await fetch('/auto/approve', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({approved:approved})})).json();
+    if (d.error){ m.className='msg err'; m.textContent=d.error; return; }
+    box.dataset.shown='0'; box.innerHTML='';
+  } catch(e){ m.className='msg err'; m.textContent='실패: '+e; }
+}
+function renderAutoResults(results){
+  if (!results || !results.length) return;
+  document.getElementById('autoResults').innerHTML =
+    '<div class="label">결과 요약</div>'+
+    results.map(function(c){
+      const sent = c.sent ? '<span class="badge b-ok">발송됨</span>' : (c.skipped ? '<span class="badge b-no_reply">건너뜀</span>' : '<span class="badge b-no">미발송</span>');
+      const rep = c.reply_status ? (' <span class="badge b-'+c.reply_status+'">'+statusLabel(c.reply_status)+'</span>') : '';
+      const fu = c.follow_up ? ('<div class="label">후속 초안</div><div class="reply">'+esc(c.follow_up)+'</div>') : '';
+      return '<div class="card"><h3>'+esc(c.name)+' '+emailBadge(c.tier, c.email)+' '+sent+rep+'</h3>'+
+        '<div class="meta"><b>이메일</b> '+(esc(c.email)||'(미발견)')+'</div>'+fu+'</div>';
+    }).join('');
 }
 
 loadConfig();

@@ -47,16 +47,6 @@ def authenticate():
 
 # ---------- Google Sheets ----------
 
-def read_company_names(creds, spreadsheet_id, name_range):
-    """업체명 열을 읽어 이름 리스트로 반환 (빈 칸 제외)."""
-    service = build("sheets", "v4", credentials=creds)
-    res = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id, range=name_range
-    ).execute()
-    rows = res.get("values", [])
-    return [row[0].strip() for row in rows if row and row[0].strip()]
-
-
 def _row_span(rng):
     """'시트1!F5:F20' 같은 A1 범위에서 행 개수를 계산. 못 구하면 0."""
     m = re.search(r"[A-Z]+(\d+):[A-Z]+(\d+)", rng)
