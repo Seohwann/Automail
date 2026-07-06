@@ -566,10 +566,10 @@ HTML = """<!DOCTYPE html>
   <div class="bar">
     <label>처리 개수 (빈칸=전체) <input class="num" id="autoLimit" value="3" style="width:64px"></label>
     <button class="primary" id="autoBtn" onclick="startAuto('fresh')">자동 실행 시작</button>
-    <button class="ghost" id="autoFreshBtn" onclick="startAuto('skip')">검색 건너뛰기</button>
+    <button class="ghost" id="autoFreshBtn" onclick="startAuto('skip')">재검색 건너뛰기</button>
     <span class="msg" id="autoMsg"></span>
   </div>
-  <div class="meta" style="margin-bottom:12px"><b>자동 실행 시작</b>: 시트의 기존 이메일·초안을 무시하고 검색 → 초안 작성 → (사람 승인) → 발송 → 답장 확인을 처음부터 진행합니다. <b>검색 건너뛰기</b>: 시트에 기재된 업체명·이메일을 그대로 사용해 초안 작성부터 진행합니다. 두 경우 모두 발송 전에는 반드시 아래에서 승인해야 합니다.</div>
+  <div class="meta" style="margin-bottom:12px"><b>자동 실행 시작</b>: 시트의 기존 이메일·초안을 무시하고 검색 → 초안 작성 → (사람 승인) → 발송 → 답장 확인을 처음부터 진행합니다. <b>재검색 건너뛰기</b>: 시트에 기재된 업체명·이메일을 그대로 사용해 초안 작성부터 진행합니다. 두 경우 모두 발송 전에는 반드시 아래에서 승인해야 합니다.</div>
   <div id="autoApproval"></div>
   <div class="label">진행 로그</div>
   <pre id="autoLog" style="background:#1f2133;color:#d7dbe8;border-radius:9px;padding:14px 16px;font-size:12.5px;line-height:1.55;max-height:320px;overflow-y:auto;white-space:pre-wrap"></pre>
@@ -784,7 +784,7 @@ function renderApproval(p){
         '<textarea class="body" id="ab_'+d.i+'">'+esc(d.body)+'</textarea></div>';
     }).join('')+
     '<div class="save-row"><button class="primary" onclick="submitApproval(false)">선택한 업체 발송 승인</button>'+
-    '<button class="ghost" onclick="submitApproval(true)">모두 건너뛰기</button>'+
+    '<button class="ghost" onclick="submitApproval(true)">발송 건너뛰기</button>'+
     '<span class="msg" id="apMsg"></span></div></div>';
 }
 async function submitApproval(skipAll){
