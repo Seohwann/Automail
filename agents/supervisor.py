@@ -6,8 +6,10 @@
   supervisor ─┬→ search  (검색 에이전트: 이메일 미발견/미검증 업체 재탐색, 지시 가능)
               ├→ write   (작성 에이전트: 초안 생성/재작성)
               ├→ approve_send (사람 승인 interrupt → 승인분만 발송 도구 실행)
-              ├→ reply   (답장 에이전트: 답장 분류 + 후속 초안)
               └→ finish
+
+답장 확인/후속 대응은 supervisor 범위가 아니다 — 답장은 실행이 끝난 며칠 뒤에
+도착하므로, 대시보드 '후속 대응' 탭에서 사람이 답장 에이전트를 실행한다.
 
 안전장치(결정적 코드 — LLM 판단에 맡기지 않음):
 - 발송은 반드시 interrupt() 로 사람 승인을 거친 업체만 실행
@@ -24,7 +26,6 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 
 from agents.google_clients import send_email
-from agents.reply_agent import run_reply_agent
 from agents.search_agent import run_search_agent
 from agents.state import WorkflowState
 from agents.writer_agent import run_writer_agent
@@ -35,9 +36,9 @@ MAX_SEARCH_ATTEMPTS = 2   # 업체당 검색 시도 상한
 
 class SupervisorDecision(BaseModel):
     """supervisor 의 다음 행동 결정 (구조화 출력)."""
-    action: Literal["search", "write", "approve_send", "reply", "finish"] = Field(
+    action: Literal["search", "write", "approve_send", "finish"] = Field(
         description="다음 행동. search=이메일 탐색, write=초안 작성, "
-                    "approve_send=사람 승인 후 발송, reply=답장 확인/분류, finish=종료")
+                    "approve_send=사람 승인 후 발송, finish=종료")
     targets: list[int] = Field(default_factory=list,
                                description="처리할 업체 인덱스 목록 (표의 # 값)")
     instruction: str = Field(default="", description="서브에이전트에 전달할 추가 지시. "
@@ -46,8 +47,7 @@ class SupervisorDecision(BaseModel):
 
 
 _SYSTEM = """당신은 협찬 제안 메일 자동화 팀의 관리자(supervisor)입니다.
-팀원: 검색 에이전트(이메일 탐색), 작성 에이전트(제안 초안), 발송 도구(사람 승인 필수),
-답장 에이전트(답장 분류·후속 초안).
+팀원: 검색 에이전트(이메일 탐색), 작성 에이전트(제안 초안), 발송 도구(사람 승인 필수).
 
 업체별 상태표를 보고 다음 행동 하나를 결정하세요.
 
@@ -58,9 +58,9 @@ _SYSTEM = """당신은 협찬 제안 메일 자동화 팀의 관리자(superviso
 - write: 이메일이 있고 초안이 없는 업체의 제안 초안 생성.
 - approve_send: 초안이 준비됐고 아직 발송 안 된 업체를 사람에게 승인받아 발송.
   건너뛴(skipped) 업체는 다시 올리지 마세요.
-- reply: 발송된 업체의 답장 확인·분류·후속 초안 생성.
-- finish: 더 진행할 유효한 작업이 없으면 종료. 검색 실패가 상한에 달했고 나머지가
-  모두 처리됐으면 미련 없이 종료하세요.
+- finish: 더 진행할 유효한 작업이 없으면 종료. 발송(또는 건너뛰기)까지 끝났으면
+  종료하세요. 답장 확인은 이 시스템 범위 밖입니다(며칠 뒤 사람이 후속 대응 탭에서
+  진행). 검색 실패가 상한에 달했고 나머지가 모두 처리됐으면 미련 없이 종료하세요.
 
 원칙:
 - 같은 행동을 같은 대상에 의미 없이 반복하지 마세요 (직전 행동이 표시됩니다).
@@ -79,7 +79,6 @@ def _status_table(companies):
             f" | 초안:{'있음' if c.get('subject') else '없음'}"
             f" | 발송:{'완료' if c.get('sent') else '안됨'}"
             f"{'(건너뜀)' if c.get('skipped') else ''}"
-            f" | 답장:{c.get('reply_status') or '-'}"
             + (f" | 실패사유:{(c.get('verify_reason') or '')[:60]}"
                if not c.get('email') else "")
         )
@@ -105,9 +104,6 @@ def _valid_targets(action, targets, companies):
             if c.get("subject") and c.get("email") and not c.get("sent") \
                     and not c.get("skipped"):
                 ok.append(i)
-        elif action == "reply":
-            if c.get("sent"):
-                ok.append(i)
     return ok
 
 
@@ -126,10 +122,6 @@ def _fallback(companies):
          and not companies[i].get("sent") and not companies[i].get("skipped")]
     if t:
         return "approve_send", t
-    t = [i for i in idx if companies[i].get("sent")
-         and not companies[i].get("reply_status")]
-    if t:
-        return "reply", t
     return "finish", []
 
 
@@ -248,32 +240,10 @@ def build_supervisor_graph(creds, llm, on_event=print):
                 on_event(f"[발송] {c['name']} 실패: {e}")
         return Command(goto="supervisor", update={"companies": companies})
 
-    def reply_node(state: WorkflowState):
-        companies = state["companies"]
-        test_email = (state.get("test_email") or "").strip()
-        context = "\n".join(x for x in [
-            f"행사명: {state.get('event_name', '')}",
-            f"행사 일자: {state.get('event_date', '')}",
-            f"제안 내용: {state.get('sponsor_items', '')}"] if x.split(':', 1)[1].strip())
-        for i in state.get("_targets", []):
-            c = companies[i]
-            probe = dict(c)
-            if test_email:
-                probe["email"] = test_email   # 테스트 모드: 답장도 테스트 주소에서 조회
-            try:
-                c.update(run_reply_agent(creds, probe, state.get("sender_name", ""),
-                                         llm, context=context))
-                on_event(f"[답장] {c['name']} → {c.get('reply_status')}")
-            except Exception as e:  # noqa: BLE001
-                c["reply_status"] = "no_reply"
-                on_event(f"[답장] {c['name']} 오류: {e}")
-        return Command(goto="supervisor", update={"companies": companies})
-
     graph = StateGraph(WorkflowState)
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("search", search_node)
     graph.add_node("write", write_node)
     graph.add_node("approve_send", approve_send_node)
-    graph.add_node("reply", reply_node)
     graph.add_edge(START, "supervisor")
     return graph.compile(checkpointer=InMemorySaver())
