@@ -11,8 +11,10 @@
 
   실행:  python automail.py   →  http://localhost:5002
 """
+import json
 import os
 import re
+import time
 
 from flask import Flask, jsonify, request
 
@@ -38,7 +40,23 @@ DEFAULTS = {
     "sponsor_items": "문행대동제 부스 협찬: 제품 샘플 500개, 부스 배너 노출, 공식 SNS 홍보 1회",
     "event_name": "문행대동제",
 }
+CONFIG_DIR = "config"   # 설정 스냅샷 저장 폴더 (타임스탬프 파일명, 최근 것을 복원)
+
+
+def _load_latest_config():
+    """config/ 의 가장 최근 JSON 설정을 읽는다. 없거나 못 읽으면 빈 dict."""
+    try:
+        files = sorted(f for f in os.listdir(CONFIG_DIR) if f.endswith(".json"))
+        if not files:
+            return {}
+        with open(os.path.join(CONFIG_DIR, files[-1]), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001 - 설정 파일 문제로 앱이 죽지 않도록
+        return {}
+
+
 cfg = {k: DEFAULTS.get(k, "") for k in CFG_KEYS}
+cfg.update({k: v for k, v in _load_latest_config().items() if k in CFG_KEYS and v})
 if not cfg.get("campus"):
     cfg["campus"] = "자연과학캠퍼스"
 if not (cfg.get("attachment_path") and os.path.exists(cfg["attachment_path"])):
@@ -154,9 +172,14 @@ def config():
             v = (d.get(k) or "").strip()
             if v:
                 cfg[k] = v
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        snap = os.path.join(CONFIG_DIR, time.strftime("%Y%m%d_%H%M%S") + ".json")
+        with open(snap, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
         return jsonify({"ok": True})
     out = dict(cfg)
     out["attachment_name"] = os.path.basename(cfg["attachment_path"]) if cfg["attachment_path"] else ""
+    out["has_saved"] = bool(_load_latest_config())
     return jsonify(out)
 
 
@@ -553,6 +576,9 @@ const CFG_FIELDS = ['spreadsheet_id','name_range','hint_range','email_range','sp
 async function loadConfig(){
   try {
     const d = await (await fetch('/config')).json();
+    if (d.has_saved){
+      CFG_FIELDS.forEach(function(k){ const el = document.getElementById('c_'+k); if (el && d[k]) el.value = d[k]; });
+    }
     const camp = document.querySelector('input[name="campus"][value="'+(d.campus||'자연과학캠퍼스')+'"]'); if(camp) camp.checked = true;
     document.getElementById('pdfName').textContent = d.attachment_name ? ('첨부: '+d.attachment_name) : '첨부 없음';
     const st1=document.getElementById('cfgStatus'); if(st1) st1.textContent = d.spreadsheet_id ? ('시트 '+d.spreadsheet_id.slice(0,8)+'…') : '';

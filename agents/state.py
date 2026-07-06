@@ -7,7 +7,7 @@ from typing import TypedDict
 
 class Company(TypedDict, total=False):
     name: str           # 업체명 (시트에서 읽음)
-    hint: str           # 업종/키워드 힌트 (시트에서 읽음, 검색 모호성 제거용)
+    hint: str           # 업종/키워드 힌트 (시트에서 읽음, 검색 모호성 제거용. URL 포함 가능)
     email: str          # 검색 에이전트가 채움
     verified: bool      # 도메인 일치 검증 통과 여부
     verify_reason: str  # 검증 판단 근거
