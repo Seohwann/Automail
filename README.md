@@ -88,7 +88,7 @@ automail/
 │   ├── config.py         # .env 로드 + Gemini LLM 팩토리
 │   └── state.py          # 상태 정의(WorkflowState/Company)
 ├── requirements.txt
-├── .env                  # GOOGLE_API_KEY, TAVILY_API_KEY  (직접 작성)
+├── .env                  # GEMINI_API_KEY, TAVILY_API_KEY  (직접 작성)
 ├── credentials.json      # Google OAuth 인증서  (직접 준비)
 └── token.json            # 첫 인증 시 자동 생성
 ```
@@ -142,7 +142,7 @@ uv pip install -r requirements.txt   # 라이브러리 설치
 **(1) `.env` 작성** — 프로젝트 루트에 아래 두 키를 넣습니다.
 
 ```dotenv
-GOOGLE_API_KEY=여기에_Gemini_API_키      # https://aistudio.google.com/app/apikey
+GEMINI_API_KEY=여기에_Gemini_API_키      # https://aistudio.google.com/app/apikey
 TAVILY_API_KEY=여기에_Tavily_API_키      # https://app.tavily.com
 # GEMINI_MODEL=gemini-3.1-flash-lite     # (선택) 기본값 사용 시 생략
 ```
