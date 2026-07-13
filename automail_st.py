@@ -392,7 +392,7 @@ def ensure_login():
     if "code" in qp:
         try:
             flow = Flow.from_client_config(client_config, scopes=SCOPES,
-                                           redirect_uri=redirect_uri,
+                                           redirect_uri=redirect_uri, autogenerate_code_verifier=False,
                                            state=qp.get("state"))
             flow.fetch_token(code=qp["code"])
             st.session_state["creds"] = flow.credentials
@@ -403,7 +403,7 @@ def ensure_login():
             _login_page(error=f"로그인 실패: {e}")
 
     # 로그인 링크 생성
-    flow = Flow.from_client_config(client_config, scopes=SCOPES,
+    flow = Flow.from_client_config(client_config, scopes=SCOPES, autogenerate_code_verifier=False,
                                    redirect_uri=redirect_uri)
     auth_url, _state = flow.authorization_url(
         access_type="offline",           # refresh_token 발급
