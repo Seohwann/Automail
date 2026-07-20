@@ -1,7 +1,7 @@
 """답장 에이전트 (ReAct — 필요하면 웹 검색으로 조사해 답변 초안을 만든다).
 
 발송한 업체로부터 온 답장을 가져와:
-  - accepted(수락) / rejected(거절) / question(추가 문의) / no_reply(무응답) 로 분류하고,
+  - accepted(수락) / rejected(거절) / question(대기 — 추가 문의) / no_reply(무응답) 로 분류하고,
   - 분류에 맞는 후속 대응 이메일 초안(follow_up)을 생성한다.
 
 기존과 달리 에이전트가 web_search 도구를 갖는다: 업체가 행사 정보·학교 규모 등
@@ -20,16 +20,16 @@ class ReplyDecision(BaseModel):
     status: str = Field(description="accepted | rejected | question 중 하나")
     follow_up: str = Field(
         description="후속으로 보낼 이메일 본문 초안. "
-        "거절이면 정중한 감사 인사, 문의면 답변, 수락이면 다음 절차 안내."
+        "거절이면 정중한 감사 인사, 대기(추가 문의)면 답변, 수락이면 다음 절차 안내."
     )
 
 
 _SYSTEM = """당신은 대학 총학생회 대외협력국의 답장 대응 에이전트입니다.
 업체로부터 받은 답장을 분류하고 후속 이메일 초안을 작성합니다.
 
-- 분류: accepted(협찬 수락) / rejected(거절) / question(추가 문의)
+- 분류: accepted(협찬 수락) / rejected(거절) / question(대기 — 추가 문의)
 - 후속 초안: 한국어 존댓말. 수락이면 다음 절차 안내, 거절이면 정중한 감사 인사,
-  문의면 질문에 대한 답변.
+  대기(추가 문의)면 질문에 대한 답변.
 - 업체가 사실 확인이 필요한 것(행사 정보, 학교 규모, 일정 등)을 물었고 당신이
   모르는 내용이면 web_search 로 조사한 뒤 답하세요. 확인 못 한 사실은 지어내지
   말고 '담당자 확인 후 회신드리겠습니다'로 처리하세요.

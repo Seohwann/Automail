@@ -4,7 +4,7 @@ Flask 버전(automail.py)과 동일한 기능/UI 를 Streamlit 으로 옮긴 앱
 GitHub + Streamlit Community Cloud 배포를 지원한다.
 
   1. 자동 실행 : supervisor 멀티 에이전트가 검색 → 초안 작성 → (사람 승인) → 발송 진행
-  2. 후속 대응 : 받은 답장을 수락/거절/문의로 분류 → 후속 초안 생성 → 편집 후 발송
+  2. 후속 대응 : 받은 답장을 수락/거절/대기로 분류 → 후속 초안 생성 → 편집 후 발송
 
 인증 (웹 OAuth 플로우):
   - st.secrets [google] 에 client_id/client_secret/redirect_uri 가 있으면

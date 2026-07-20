@@ -5,7 +5,7 @@
 
   1. 검색      : 시트의 업체명+힌트로 웹 검색 → 이메일 추출/검증 → 시트(이메일 열) 저장 + 표시
   2. 초안 작성 : 업체 정보+협찬 품목으로 제안 메일 초안 생성 → 시트(제목/본문) 저장 + 표시(편집 가능)
-  3. 후속 대응 : 받은 답장을 수락/거절/문의로 분류 → 후속 초안 생성 → 편집 후 발송
+  3. 후속 대응 : 받은 답장을 수락/거절/대기로 분류 → 후속 초안 생성 → 편집 후 발송
 
 설정 기본값은 이 파일 상단의 DEFAULTS 에서 가져오며, UI 에서 바꾼 값은 실행 중인 세션에만 적용된다.
 
@@ -579,7 +579,7 @@ HTML = """<!DOCTYPE html>
 <script>
 function esc(s){ return (s||'').replace(/[&<>]/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;'})[m]; }); }
 function escAttr(s){ return (s||'').replace(/[&<>"]/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[m]; }); }
-function statusLabel(s){ return ({accepted:'수락', rejected:'거절', question:'문의', no_reply:'무응답', loading:'분류중…'})[s] || ''; }
+function statusLabel(s){ return ({accepted:'수락', rejected:'거절', question:'대기', no_reply:'무응답', loading:'분류중…'})[s] || ''; }
 function tierBadge(t){ if(t==='HIGH') return '<span class="badge b-ok">검증 O</span>'; if(t==='REVIEW') return '<span class="badge b-question">검토 필요</span>'; return '<span class="badge b-no">미발견</span>'; }
 function emailBadge(tier, email){ if(tier) return tierBadge(tier); if(email) return '<span class="badge b-no_reply">시트 입력·미검증</span>'; return tierBadge(''); }
 
