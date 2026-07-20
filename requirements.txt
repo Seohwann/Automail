@@ -11,3 +11,6 @@ pydantic
 
 # 기존 Flask UI (app.py) 용
 flask
+
+# Streamlit UI (automail_st.py) 용 (st.container(key=, gap=) 사용 → 1.47 이상)
+streamlit>=1.47
