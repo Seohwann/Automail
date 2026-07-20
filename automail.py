@@ -35,7 +35,7 @@ CFG_KEYS = ["spreadsheet_id", "name_range", "hint_range", "email_range",
             "writer_phone", "campus", "attachment_path"]
 # 기본 설정값 (UI에서 비워두면 이 값이 사용됨). 본인 스프레드시트에 맞게 수정하세요.
 DEFAULTS = {
-    "spreadsheet_id": "16BkIPzlETSdzbMtENtqgr0eBi0BO14UkJthKZ9uU7A8",
+    "spreadsheet_id": "d/ 뒤에 있는 Spreadsheet ID를 입력하세요",
     "name_range": "실험용!B5:B13",
     "hint_range": "실험용!C5:C13",
     "email_range": "실험용!F5:F13",
