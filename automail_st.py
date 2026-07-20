@@ -931,7 +931,7 @@ with tab_auto:
                 st.markdown(f'**{esc(c.get("name",""))}** '
                             + email_badge(c.get("tier"), c.get("email"))
                             + " " + sent + rep, unsafe_allow_html=True)
-                st.markdown(f'<div class="meta"><b>이메일</b> '
+                st.markdown(f'<div class="meta" style="margin-bottom:10px"><b>이메일</b> '
                             f'{esc(c.get("email","")) or "(미발견)"}</div>',
                             unsafe_allow_html=True)
                 if c.get("follow_up"):
