@@ -1,4 +1,4 @@
-"""협찬 메일 자동화 대시보드 (독립 실행 웹 UI).
+"""Automail (독립 실행 웹 UI).
 
 상단 설정 패널에서 스프레드시트 ID·범위·협찬 품목을 입력하고 제안서 PDF를 첨부한 뒤,
 세 개의 탭에서 에이전트를 단계별로 실행한다.
@@ -444,7 +444,7 @@ HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>협찬 메일 자동화 대시보드</title>
+<title>Automail</title>
 <style>
   * { box-sizing: border-box; }
   body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; color:#1a1a1a; background:#f5f6f8; }
@@ -506,7 +506,7 @@ HTML = """<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>협찬 메일 자동화 대시보드</h1>
+  <h1>Automail</h1>
   <div class="testbar">
     <label><input type="checkbox" id="testToggle" checked> 테스트 모드</label>
     <input type="email" id="testEmail" value="seohwan3549@gmail.com" placeholder="테스트 수신 주소">
@@ -828,7 +828,7 @@ loadConfig();
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("  협찬 메일 자동화 대시보드")
+    print("  Automail")
     print("  http://localhost:5002")
     print("=" * 50)
     app.run(host="0.0.0.0", port=5002, debug=False)

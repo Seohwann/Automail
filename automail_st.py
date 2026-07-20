@@ -1,4 +1,4 @@
-"""협찬 메일 자동화 대시보드 (Streamlit 버전).
+"""Automail (Streamlit 버전).
 
 Flask 버전(automail.py)과 동일한 기능/UI 를 Streamlit 으로 옮긴 앱.
 GitHub + Streamlit Community Cloud 배포를 지원한다.
@@ -103,7 +103,7 @@ def get_cfg():
 
 # ---------- 페이지 기본 설정 (로그인 화면에서도 필요하므로 먼저 수행) ----------
 st.set_page_config(
-    page_title="협찬 메일 자동화 대시보드",
+    page_title="Automail",
     layout="wide",
 )
 
@@ -356,7 +356,7 @@ def _web_client():
 
 def _login_page(auth_url=None, error=None):
     """로그인 전용 화면을 그리고 실행을 멈춘다."""
-    st.markdown('<div class="app-header">협찬 메일 자동화 대시보드</div>',
+    st.markdown('<div class="app-header">Automail</div>',
                 unsafe_allow_html=True)
     st.markdown("본인 Google 계정으로 로그인하면 **본인의 Gmail 로 발송**하고 "
                 "**본인의 스프레드시트**를 읽고 쓰게 됩니다.")
@@ -711,7 +711,7 @@ h1, h2, h3 = st.columns(
 
 with h1:
     st.markdown(
-        '<div class="app-header">협찬 메일 자동화 대시보드</div>',
+        '<div class="app-header">Automail</div>',
         unsafe_allow_html=True,
     )
 
