@@ -17,6 +17,7 @@ GitHub + Streamlit Community Cloud 배포를 지원한다.
 
   실행:  streamlit run automail_st.py
 """
+import datetime
 import html as _html
 import json
 import os
@@ -69,7 +70,7 @@ DEFAULTS = {
     "hint_range": "실험용!C5:C13",
     "email_range": "실험용!F5:F13",
     "sponsor_items": "문행대동제 부스 협찬: 제품 샘플 500개, 부스 배너 노출, 공식 SNS 홍보 1회",
-    "event_name": "문행대동제",
+    "event_name": "2026 대동제",
 }
 CONFIG_DIR = os.path.join(BASE_DIR, "config")   # 설정 스냅샷 저장 폴더
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
@@ -770,10 +771,15 @@ with st.expander("설정 / 첨부", expanded=False):
     e1, e2, e3, e4, e5 = st.columns([1.4, 1.1, 1.1, 1.2, 2.2])
     with e1:
         st.text_input("행사명", value=cfg["event_name"], key="c_event_name",
-                      placeholder="예: 문행대동제")
+                      placeholder="예: 2026 대동제")
     with e2:
-        st.text_input("행사 일자", value=cfg["event_date"], key="c_event_date",
-                      placeholder="예: 2026-05-12")
+        try:
+            _ed_default = (datetime.date.fromisoformat(cfg["event_date"])
+                           if cfg.get("event_date") else None)
+        except ValueError:  # 저장된 값이 ISO 형식이 아니면 빈칸으로
+            _ed_default = None
+        st.date_input("행사 일자", value=_ed_default, key="c_event_date",
+                      format="YYYY-MM-DD")
     with e3:
         st.text_input("담당자 이름", value=cfg["writer_name"], key="c_writer_name",
                       placeholder="예: 김서환")
@@ -800,12 +806,15 @@ with st.expander("설정 / 첨부", expanded=False):
         st.caption("첨부 없음")
     if st.button("설정 저장", type="primary"):
         for k in CFG_KEYS:
-            if k in ("attachment_path", "campus"):
+            if k in ("attachment_path", "campus", "event_date"):
                 continue
             v = (st.session_state.get("c_" + k) or "").strip()
             if v:
                 cfg[k] = v
         cfg["campus"] = st.session_state.get("c_campus", "자연과학캠퍼스")
+        _ed = st.session_state.get("c_event_date")  # date 객체 → "YYYY-MM-DD" 문자열
+        if _ed:
+            cfg["event_date"] = _ed.isoformat()
         os.makedirs(CONFIG_DIR, exist_ok=True)
         snap = os.path.join(CONFIG_DIR, time.strftime("%Y%m%d_%H%M%S") + ".json")
         with open(snap, "w", encoding="utf-8") as f:
@@ -922,7 +931,7 @@ with tab_auto:
                 st.markdown(f'**{esc(c.get("name",""))}** '
                             + email_badge(c.get("tier"), c.get("email"))
                             + " " + sent + rep, unsafe_allow_html=True)
-                st.markdown(f'<div class="meta"><b>이메일</b> '
+                st.markdown(f'<div class="meta" style="margin-bottom:10px"><b>이메일</b> '
                             f'{esc(c.get("email","")) or "(미발견)"}</div>',
                             unsafe_allow_html=True)
                 if c.get("follow_up"):
