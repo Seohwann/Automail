@@ -70,7 +70,7 @@ DEFAULTS = {
     "hint_range": "실험용!C5:C13",
     "email_range": "실험용!F5:F13",
     "sponsor_items": "문행대동제 부스 협찬: 제품 샘플 500개, 부스 배너 노출, 공식 SNS 홍보 1회",
-    "event_name": "문행대동제",
+    "event_name": "2026 대동제",
 }
 CONFIG_DIR = os.path.join(BASE_DIR, "config")   # 설정 스냅샷 저장 폴더
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
@@ -771,7 +771,7 @@ with st.expander("설정 / 첨부", expanded=False):
     e1, e2, e3, e4, e5 = st.columns([1.4, 1.1, 1.1, 1.2, 2.2])
     with e1:
         st.text_input("행사명", value=cfg["event_name"], key="c_event_name",
-                      placeholder="예: 문행대동제")
+                      placeholder="예: 2026 대동제")
     with e2:
         try:
             _ed_default = (datetime.date.fromisoformat(cfg["event_date"])
