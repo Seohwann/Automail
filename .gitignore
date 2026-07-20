@@ -2,3 +2,4 @@ uploads/
 *.json
 .env
 __pycache__/
+DEPLOY_STREAMLIT.md
