@@ -157,6 +157,8 @@ TAVILY_API_KEY=여기에_Tavily_API_키      # https://app.tavily.com
 python automail.py           # → http://localhost:5002
 ```
 
+> **배포 버전으로 바로 사용하기** — 로컬 설치 없이 배포된 Streamlit 앱에 접속해 바로 실행해 볼 수도 있습니다: **https://automail1398.streamlit.app/**
+
 ---
 
 ## 6. 사용법
